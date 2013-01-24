@@ -26,41 +26,24 @@ package com.ts.exemplars;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /*
- * WorkGroupDistributor dispatches all work groups and
- * creates the work results list. It shuts down the Executor service
- * upon completion. 
- * 
- * @TODO This class can be readily enhanced to handle a global
- * retry policy and possibly to start multiple groups concurrently.
- * 
+ * Wrapper around collection class to improve client code readability.
  */
-public class WorkGroupDistributor<T> {
-	private final int timeout;
-	private final ExecutorService service;
+public class WorkGroupResult<T> {
+	private final List<T> results = new ArrayList<T>();
 
-	public WorkGroupDistributor(int threadPoolSize, int timeout) {
-		service = Executors.newFixedThreadPool(threadPoolSize);
-		this.timeout = timeout;
+	public List<T> getWorkGroupResult() {
+		return results;
 	}
 
-	public List<WorkGroupResult<T>> doWork(List<WorkGroup<T>> workGroups) {
-		List<WorkGroupResult<T>> workResults = new ArrayList<WorkGroupResult<T>>();
-		try {
-			int groupIndex = 0;
-			for (WorkGroup<T> workgroup : workGroups) {
-				workResults.add(workgroup.processGroup(groupIndex++, service,
-						timeout));
-			}
-		} catch (InterruptedException notExpected) {
-			throw new IllegalStateException(notExpected);
-		} finally {
-			service.shutdown();
-		}
-
-		return workResults;
+	public void addResult(T result) {
+		results.add(result);
 	}
+
+	@Override
+	public String toString() {
+		return "WorkGroupResult [results=" + results + "]";
+	}
+
 }

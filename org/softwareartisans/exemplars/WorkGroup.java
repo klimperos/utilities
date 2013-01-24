@@ -1,4 +1,4 @@
-package org.softwareartisans.exemplars;
+package com.ts.exemplars;
 
 /*
  Copyright (c) 2013 Software Artisans, LLC
@@ -32,22 +32,43 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+/*
+ * Process group of worker callables.
+ *
+ * All threads must complete (exception or success)
+ * before any retries occur. All callables that failed
+ * will be concurrently retried until the retry limit is reached for the group.
+ * 
+ * TODO: Enhance to allocate one thread to wait on each worker
+ * to enable restarts to begin immediately. This doesn't work
+ * with a single manager thread because future.get() blocks until the corresponding
+ * callable completes. This is efficient as long as the tasks are of approximately equal
+ * duration. As they differ more, other threads may be ready for retry but
+ * the manager may be waiting on a longer thread before restarting them.
+ * And while we can check isDone(), this would require periodic polling
+ * which is less efficient than restarting each failed worker immediately,
+ * i.e. on a per-thread basis as soon as it fails.
+ */
 public class WorkGroup<T> {
-	private final ExecutorService service;
-	private final int retryLimit = 2;
-	private final int timeout;
 	private final List<Task<T>> tasks = new ArrayList<Task<T>>();
+	private final int retryLimit = 2;
 	private int retryCount = 0;
 
-	WorkGroup(ExecutorService service, int timeout, List<Callable<T>> group) {
-		this.service = service;
-		this.timeout = timeout;
-
+	private WorkGroup(List<Callable<T>> group) {
 		int count = 0;
 		for (Callable<T> callable : group) {
 			Task<T> t = new Task<T>(count++, callable);
 			tasks.add(t);
 		}
+	}
+
+	/*
+	 * WorkGroup Public API
+	 * 
+	 * Generic Factory
+	 */
+	public static <V> WorkGroup<V> getInstance(List<Callable<V>> group) {
+		return new WorkGroup<V>(group);
 	}
 
 	/*
@@ -64,7 +85,8 @@ public class WorkGroup<T> {
 	 * 
 	 * @returns A list of results in the order the group tasks were provided.
 	 */
-	public List<T> processGroup(int groupIndex) throws InterruptedException {
+	public WorkGroupResult<T> processGroup(int groupIndex,
+			ExecutorService service, int timeout) throws InterruptedException {
 		retryCount = 0;
 
 		// Submit all incomplete jobs concurrently
@@ -73,8 +95,6 @@ public class WorkGroup<T> {
 			checkRetryPolicy(groupIndex);
 		}
 
-		System.out
-				.println("Group " + groupIndex + " results = " + getResults());
 		return getResults();
 	}
 
@@ -99,10 +119,10 @@ public class WorkGroup<T> {
 		return incompleteCallables;
 	}
 
-	private List<T> getResults() {
-		List<T> results = new ArrayList<T>();
+	private WorkGroupResult<T> getResults() {
+		WorkGroupResult<T> results = new WorkGroupResult<T>();
 		for (Task<T> t : tasks) {
-			results.add(t.getResult());
+			results.addResult(t.getResult());
 		}
 		return results;
 	}

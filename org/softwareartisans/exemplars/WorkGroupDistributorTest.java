@@ -1,4 +1,4 @@
-package org.softwareartisans.exemplars;
+package com.ts.exemplars;
 
 /*
  Copyright (c) 2013 Software Artisans, LLC
@@ -28,22 +28,32 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 
+/*
+ * WorkDistributor test driver to create a trivial Workerbee task
+ * and a couple groups of 10 such tasks, submit them to the work group distributor
+ * and output the result lists.
+ */
 public class WorkGroupDistributorTest {
 
-	// Client code: Usually not conjoined with WorkerTest class
 	public static void main(String[] args) {
-		List<Callable<Integer>> group = new ArrayList<Callable<Integer>>();
+
+		List<Callable<Integer>> callables = new ArrayList<Callable<Integer>>();
 		for (int i = 0; i < 10; i++) {
 			Callable<Integer> workerBee = new WorkerBee(i);
-			group.add(workerBee);
+			callables.add(workerBee);
 		}
-		List<List<Callable<Integer>>> workLoad = new ArrayList<List<Callable<Integer>>>();
-		workLoad.add(group);
-		workLoad.add(group);
 
-		// dispatch to object typed to worker type
-		System.out.println("\nWorkload Process Results = "
-				+ new WorkGroupDistributor<Integer>(10, 1000).doWork(workLoad));
+		List<WorkGroup<Integer>> workGroups = new ArrayList<WorkGroup<Integer>>();
+		workGroups.add(WorkGroup.getInstance(callables));
+		workGroups.add(WorkGroup.getInstance(callables));
+
+		List<WorkGroupResult<Integer>> workGroupResults = new WorkGroupDistributor<Integer>(
+				10, 1000).doWork(workGroups);
+
+		int count = 0;
+		for (WorkGroupResult<Integer> workGroupResult : workGroupResults) {
+			System.out.println("Workgroup " + count++ + ": " + workGroupResult);
+		}
 	}
 
 	static class WorkerBee implements Callable<Integer> {

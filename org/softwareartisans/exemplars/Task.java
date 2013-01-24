@@ -1,4 +1,4 @@
-package org.softwareartisans.exemplars;
+package com.ts.exemplars;
 
 /*
  Copyright (c) 2013 Software Artisans, LLC
