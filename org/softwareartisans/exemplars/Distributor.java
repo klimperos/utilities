@@ -24,42 +24,43 @@ package org.softwareartisans.util.workgroup;
  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import java.util.concurrent.Callable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-public class Task<T> {
-	private final int taskId;
-	private final Callable<T> callable;
-	private boolean isComplete;
-	private T result;
+/*
+ * Distributor dispatches all work groups and
+ * creates the work results list. It shuts down the Executor service
+ * upon completion. 
+ * 
+ * @TODO This class can be readily enhanced to handle a global
+ * retry policy and possibly to start multiple groups concurrently.
+ * 
+ */
+public class Distributor<T> {
+	private final int timeout;
+	private final ExecutorService service;
 
-	public T getResult() {
-		return result;
+	public Distributor(int threadPoolSize, int timeout) {
+		service = Executors.newFixedThreadPool(threadPoolSize);
+		this.timeout = timeout;
 	}
 
-	public void setResult(T result) {
-		this.result = result;
-	}
+	public List<Result<T>> doWork(List<Processor<T>> workGroups) {
+		List<Result<T>> workResults = new ArrayList<Result<T>>();
+		try {
+			int groupIndex = 0;
+			for (Processor<T> workgroup : workGroups) {
+				workResults.add(workgroup.processGroup(groupIndex++, service,
+						timeout));
+			}
+		} catch (InterruptedException notExpected) {
+			throw new IllegalStateException(notExpected);
+		} finally {
+			service.shutdown();
+		}
 
-	public Task(int taskId, Callable<T> task) {
-		super();
-		this.taskId = taskId;
-		this.callable = task;
+		return workResults;
 	}
-
-	public int getTaskId() {
-		return taskId;
-	}
-
-	public Callable<T> getCallable() {
-		return callable;
-	}
-
-	public boolean isComplete() {
-		return isComplete;
-	}
-
-	public void setComplete(boolean isComplete) {
-		this.isComplete = isComplete;
-	}
-
 }

@@ -24,42 +24,26 @@ package org.softwareartisans.util.workgroup;
  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import java.util.concurrent.Callable;
+import java.util.ArrayList;
+import java.util.List;
 
-public class Task<T> {
-	private final int taskId;
-	private final Callable<T> callable;
-	private boolean isComplete;
-	private T result;
+/*
+ * Wrapper around collection class to improve client code readability.
+ */
+public class Result<T> {
+	private final List<T> results = new ArrayList<T>();
 
-	public T getResult() {
-		return result;
+	public List<T> getWorkGroupResult() {
+		return results;
 	}
 
-	public void setResult(T result) {
-		this.result = result;
+	public void addResult(T result) {
+		results.add(result);
 	}
 
-	public Task(int taskId, Callable<T> task) {
-		super();
-		this.taskId = taskId;
-		this.callable = task;
-	}
-
-	public int getTaskId() {
-		return taskId;
-	}
-
-	public Callable<T> getCallable() {
-		return callable;
-	}
-
-	public boolean isComplete() {
-		return isComplete;
-	}
-
-	public void setComplete(boolean isComplete) {
-		this.isComplete = isComplete;
+	@Override
+	public String toString() {
+		return "WorkGroupResult [results=" + results + "]";
 	}
 
 }
