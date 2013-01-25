@@ -26,25 +26,62 @@ package org.softwareartisans.util.workgroup;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/*
+ * Distributor dispatches all work groups and
+ * creates the work results list. It shuts down the Executor service
+ * upon completion. 
+ * 
+ * @TODO This class can be readily enhanced to handle a global
+ * retry policy and possibly to start multiple groups concurrently.
+ * 
+ */
 
 public class Space<T> {
-	private final List<Group<Callable<T>>> workGroups = new ArrayList<Group<Callable<T>>>();
+	private final List<Group<T>> groups;
+	private final int threadPoolSize;
 
-	// TODO: Configure from Spring
-	private final int threads;
-
-	public Space(int threads) {
-		this.threads = threads;
-
-	}
-
-	public void addWorkGroup(Group<Callable<T>> group) {
-		workGroups.add(group);
+	private Space(SpaceBuilder<T> builder) {
+		this.groups = builder.groups;
+		this.threadPoolSize = builder.threadPoolSize;
 	}
 
 	public List<Result<T>> solve() {
-		Distributor<T> d = new Distributor<T>(threads);
-		return d.doWork(workGroups);
+		List<Result<T>> results = new ArrayList<Result<T>>();
+		ExecutorService s = Executors.newFixedThreadPool(threadPoolSize);
+
+		try {
+			int groupIndex = 0;
+			for (Group<T> group : groups) {
+				results.add(group.processGroup(s, groupIndex++));
+			}
+		} catch (InterruptedException notExpected) {
+			throw new IllegalStateException(notExpected);
+		} finally {
+			s.shutdown();
+		}
+
+		return results;
+	}
+
+	public static class SpaceBuilder<T> {
+		private final List<Group<T>> groups = new ArrayList<Group<T>>();
+		private int threadPoolSize = 5;
+
+		public Space<T> build() {
+			return new Space<T>(this);
+		}
+
+		public SpaceBuilder<T> addGroup(Group<T> group) {
+			groups.add(group);
+			return this;
+		}
+
+		public SpaceBuilder<T> threadPoolSize(int val) {
+			threadPoolSize = val;
+			return this;
+		}
 	}
 }
