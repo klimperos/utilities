@@ -158,16 +158,4 @@ public class Group<T> {
 		}
 
 	}
-
-	public static class GroupsBuilder<T> {
-		private final List<Group<T>> groups = new ArrayList<Group<T>>();
-
-		public void addGroup(Group<T> group) {
-			groups.add(group);
-		}
-
-		public List<Group<T>> build() {
-			return groups;
-		}
-	}
 }
