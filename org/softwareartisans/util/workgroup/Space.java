@@ -24,52 +24,27 @@ package org.softwareartisans.util.workgroup;
  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Callable;
 
-/*
- * Distributor test driver to create a trivial Workerbee task
- * and a couple groups of 10 such tasks, submit them to the work group distributor
- * and output the result lists.
- */
-public class DistributorTest {
+public class Space<T> {
+	private final List<Group<Callable<T>>> workGroups = new ArrayList<Group<Callable<T>>>();
 
-	public static void main(String[] args) {
-		Group<Callable<Integer>> solvers = new Group<Callable<Integer>>();
-		for (int i = 0; i < 10; i++) {
-			Callable<Integer> workerBee = new WorkerBee(i);
-			solvers.addSolver(workerBee);
-		}
+	// TODO: Configure from Spring
+	private final int threads;
 
-		Space<Integer> space = new Space<Integer>(10);
-		space.addWorkGroup(solvers);
-		space.addWorkGroup(solvers);
+	public Space(int threads) {
+		this.threads = threads;
 
-		int count = 0;
-		for (Result<Integer> groupResult : space.solve()) {
-			System.out.println("Workgroup " + count++ + ": " + groupResult);
-		}
 	}
 
-	static class WorkerBee implements Callable<Integer> {
-		private final int number;
-		private int count = 0;
+	public void addWorkGroup(Group<Callable<T>> group) {
+		workGroups.add(group);
+	}
 
-		WorkerBee(int number) {
-			this.number = number;
-		}
-
-		@Override
-		public Integer call() throws Exception {
-			if ((number == 7 || number == 5) && count++ < 2) {
-				throw new Exception("Test Exception for thread: " + number);
-			} else {
-				return number * number;
-			}
-		}
-
-		@Override
-		public String toString() {
-			return "Workerbee # " + number;
-		}
+	public List<Result<T>> solve() {
+		Distributor<T> d = new Distributor<T>(threads);
+		return d.doWork(workGroups);
 	}
 }

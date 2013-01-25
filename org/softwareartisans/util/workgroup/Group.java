@@ -26,44 +26,19 @@ package org.softwareartisans.util.workgroup;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-/*
- * Distributor dispatches all work groups and
- * creates the work results list. It shuts down the Executor service
- * upon completion. 
- * 
- * @TODO This class can be readily enhanced to handle a global
- * retry policy and possibly to start multiple groups concurrently.
- * 
- */
-public class Distributor<T> {
+public class Group<T> {
+	private final List<T> solvers = new ArrayList<T>();
 
-	private final int threadPoolSize;
-
-	public Distributor(int threadPoolSize) {
-		this.threadPoolSize = threadPoolSize;
+	public Group() {
 	}
 
-	public List<Result<T>> doWork(List<Group<Callable<T>>> workGroups) {
-		List<Result<T>> workResults = new ArrayList<Result<T>>();
-		ExecutorService s = Executors.newFixedThreadPool(threadPoolSize);
-
-		try {
-			int groupIndex = 0;
-			Processor<T> p;
-			for (Group<Callable<T>> workGroup : workGroups) {
-				p = Processor.getInstance(workGroup);
-				workResults.add(p.processGroup(s, groupIndex++));
-			}
-		} catch (InterruptedException notExpected) {
-			throw new IllegalStateException(notExpected);
-		} finally {
-			s.shutdown();
-		}
-
-		return workResults;
+	public List<T> getSolvers() {
+		return solvers;
 	}
+
+	public void addSolver(T solver) {
+		this.solvers.add(solver);
+	}
+
 }

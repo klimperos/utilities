@@ -25,38 +25,33 @@ package org.softwareartisans.util.workgroup;
  */
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 /*
  * Process group of worker callables.
  *
- * All threads must complete (exception or success)
- * before any retries occur. All callables that failed
- * will be concurrently retried until the retry limit is reached for the group.
+ * Threads are submitted asynchronously.  Any callables that fail
+ * will be immediately retried until the retry limit is reached for the task.
  * 
- * TODO: Enhance to allocate one thread to wait on each worker
- * to enable restarts to begin immediately. This doesn't work
- * with a single manager thread because future.get() blocks until the corresponding
- * callable completes. This is efficient as long as the tasks are of approximately equal
- * duration. As they differ more, other threads may be ready for retry but
- * the manager may be waiting on a longer thread before restarting them.
- * And while we can check isDone(), this would require periodic polling
- * which is less efficient than restarting each failed worker immediately,
- * i.e. on a per-thread basis as soon as it fails.
  */
 public class Processor<T> {
 	private final List<Task<T>> tasks = new ArrayList<Task<T>>();
-	private final int retryLimit = 2;
-	private int retryCount = 0;
 
-	private Processor(List<Callable<T>> group) {
+	// TODO: Configure from Spring
+	private final int taskRetryLimit = 2;
+	private final Map<Integer, Integer> retries = new HashMap<Integer, Integer>();
+
+	private Processor(Group<Callable<T>> group) {
 		int count = 0;
-		for (Callable<T> callable : group) {
+		for (Callable<T> callable : group.getSolvers()) {
 			Task<T> t = new Task<T>(count++, callable);
 			tasks.add(t);
 		}
@@ -65,18 +60,19 @@ public class Processor<T> {
 	/*
 	 * WorkGroup Public API
 	 * 
-	 * Generic Factory
+	 * Generic Factory method
 	 */
-	public static <V> Processor<V> getInstance(List<Callable<V>> group) {
+	public static <V> Processor<V> getInstance(Group<Callable<V>> group) {
 		return new Processor<V>(group);
 	}
 
 	/*
 	 * WorkGroup Public API
 	 * 
-	 * Process group set in the ctor by dispersing the group's work to a
-	 * threadpool and then retrying all failed tasks as many times as the retry
-	 * policy permits.
+	 * Process group set by submitting the group's work to a threadpool and then
+	 * retrying any failed tasks as many times as the retry policy permits.
+	 * 
+	 * @param s the executor service to use to process each task.
 	 * 
 	 * @param groupIndex the ID for the group's execution order, starting with 0
 	 * 
@@ -85,17 +81,44 @@ public class Processor<T> {
 	 * 
 	 * @returns A list of results in the order the group tasks were provided.
 	 */
-	public Result<T> processGroup(int groupIndex,
-			ExecutorService service, int timeout) throws InterruptedException {
-		retryCount = 0;
-
-		// Submit all incomplete jobs concurrently
-		while (!areResultsComplete(service.invokeAll(getIncompleteCallables(),
-				timeout, TimeUnit.MILLISECONDS))) {
-			checkRetryPolicy(groupIndex);
-		}
+	public Result<T> processGroup(ExecutorService s, int groupIndex)
+			throws InterruptedException {
+		CompletionService<T> ecs = new ExecutorCompletionService<T>(s);
+		processAsyncTaskResults(groupIndex, ecs, submitTasksForProcessing(ecs));
 
 		return getResults();
+	}
+
+	private Map<Future<T>, Integer> submitTasksForProcessing(
+			CompletionService<T> ecs) {
+		Map<Future<T>, Integer> futureMap = new HashMap<Future<T>, Integer>();
+
+		for (Task<T> t : tasks) {
+			Future<T> future = ecs.submit(t.getCallable());
+			futureMap.put(future, t.getTaskId());
+		}
+		return futureMap;
+	}
+
+	private void processAsyncTaskResults(int groupIndex,
+			CompletionService<T> ecs, Map<Future<T>, Integer> futureMap)
+			throws InterruptedException {
+		System.out.println("Process Group: " + groupIndex);
+		while (getIncompleteTasks().size() > 0) {
+			Future<T> future = ecs.take();
+			Integer taskId = futureMap.get(future);
+
+			try {
+				T result = future.get();
+				Task<T> task = getTask(taskId);
+				task.setComplete(true);
+				task.setResult(result);
+			} catch (ExecutionException e) {
+				checkRetryPolicy(groupIndex, taskId);
+				futureMap
+						.put(ecs.submit(getTask(taskId).getCallable()), taskId);
+			}
+		}
 	}
 
 	private List<Task<T>> getIncompleteTasks() {
@@ -108,15 +131,13 @@ public class Processor<T> {
 		return incompleteTasks;
 	}
 
-	private List<Callable<T>> getIncompleteCallables() {
-		List<Callable<T>> incompleteCallables = new ArrayList<Callable<T>>();
-		List<Task<T>> incompleteTasks = getIncompleteTasks();
-		for (Task<T> t : incompleteTasks) {
-			if (!t.isComplete()) {
-				incompleteCallables.add(t.getCallable());
+	private Task<T> getTask(int taskId) {
+		for (Task<T> t : tasks) {
+			if (t.getTaskId() == taskId) {
+				return t;
 			}
 		}
-		return incompleteCallables;
+		throw new IllegalStateException("Could not find task: " + taskId);
 	}
 
 	private Result<T> getResults() {
@@ -127,28 +148,20 @@ public class Processor<T> {
 		return results;
 	}
 
-	private boolean areResultsComplete(List<Future<T>> futures)
+	private void checkRetryPolicy(int groupIndex, int taskId)
 			throws InterruptedException {
-		int count = 0;
-		List<Task<T>> incompleteTasks = getIncompleteTasks();
-		for (Future<T> future : futures) {
-			try {
-				T result = future.get();
-				Task<T> task = incompleteTasks.get(count++);
-				task.setResult(result);
-				task.setComplete(true);
-			} catch (ExecutionException e) {
-				count++;
-			}
+		Integer taskRetries = 0;
+		if (retries.containsKey(taskId)) {
+			taskRetries = retries.get(taskId);
+			retries.put(taskId, ++taskRetries);
+		} else {
+			retries.put(taskId, ++taskRetries);
 		}
 
-		return getIncompleteTasks().size() == 0;
-	}
-
-	private void checkRetryPolicy(int groupIndex) throws InterruptedException {
-		if (retryCount++ == retryLimit) {
+		if (taskRetries > taskRetryLimit) {
 			throw new IllegalStateException("Group " + groupIndex
 					+ " exceeded retry limit, entire work set cancelled");
 		}
+
 	}
 }
