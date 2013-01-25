@@ -153,10 +153,9 @@ public class Processor<T> {
 		Integer taskRetries = 0;
 		if (retries.containsKey(taskId)) {
 			taskRetries = retries.get(taskId);
-			retries.put(taskId, ++taskRetries);
-		} else {
-			retries.put(taskId, ++taskRetries);
 		}
+
+		retries.put(taskId, ++taskRetries);
 
 		if (taskRetries > taskRetryLimit) {
 			throw new IllegalStateException("Group " + groupIndex
