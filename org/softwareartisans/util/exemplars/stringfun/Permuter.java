@@ -30,22 +30,27 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
-public class Permutor {
+/* Permuter: Recursive string permuter
+ * 
+ * Usage: java Permuter <String-to-be-Permuted>
+ */
+public class Permuter {
 	public static void main(String[] args) {
-		Permutor p = new Permutor();
-		int count = 0;
-		Set<StringBuilder> permutations = p.getPermutations(args[0]);
+		Permuter permutor = new Permuter();
+		Set<StringBuilder> permutations = permutor.getPermutations(args[0]);
 
 		TreeSet<String> results = new TreeSet<String>();
-		for (StringBuilder permutation : permutations) {
-			results.add(permutation.toString());
+		for (StringBuilder pe : permutations) {
+			results.add(pe.toString());
 		}
 
+		int count = 0;
+		System.out.println("Permutations:");
 		for (String result : results) {
-			System.out.println("Permutation = " + result);
+			System.out.println(result);
 			count++;
 		}
-		System.out.println("Count = " + count);
+		System.out.println("Permutation Count = " + count);
 	}
 
 	Set<StringBuilder> getPermutations(String target) {
@@ -57,24 +62,22 @@ public class Permutor {
 		return permute(chars);
 	}
 
-	Set<StringBuilder> permute(List<Character> chars) {
+	Set<StringBuilder> permute(List<Character> characters) {
 		Set<StringBuilder> results = new HashSet<StringBuilder>();
 
 		// Base Case
-		if (chars.size() == 1) {
-			for (Character c : chars) {
+		if (characters.size() == 1) {
+			for (Character c : characters) {
 				results.add(new StringBuilder().append(c));
 			}
 			// Recursive Case: Prepend character to all shorter permutations
 		} else {
-			List<Character> newChars = new ArrayList<Character>(chars);
+			List<Character> newCharacters = new ArrayList<Character>(characters);
 
-			for (Character c : chars) {
-				newChars.remove(c);
-				Set<StringBuilder> oldPerms = permute(newChars);
-				Set<StringBuilder> newPerms = formStrings(c, oldPerms);
-				results.addAll(newPerms);
-				newChars.add(c);
+			for (Character c : characters) {
+				newCharacters.remove(c);
+				results.addAll(formStrings(c, permute(newCharacters)));
+				newCharacters.add(c);
 			}
 		}
 
@@ -84,8 +87,8 @@ public class Permutor {
 	Set<StringBuilder> formStrings(Character prefix,
 			Set<StringBuilder> permutations) {
 		Set<StringBuilder> results = new HashSet<StringBuilder>();
-		for (StringBuilder permutation : permutations) {
-			results.add(permutation.insert(0, prefix));
+		for (StringBuilder p : permutations) {
+			results.add(p.insert(0, prefix));
 		}
 
 		return results;
