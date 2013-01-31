@@ -33,12 +33,39 @@ import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import org.softwareartisans.util.workgroup.retry.ImmediateCounting;
+import org.softwareartisans.util.workgroup.retry.Retrier;
+import org.softwareartisans.util.workgroup.retry.TimedRetrierDecorator;
+
+/* Group processes a set of given tasks, retying according to a
+ * retry check policy. We use a decorated policy that adds a backoff
+ * timer between task resubmissions to the executor. Retrying is handled
+ * by a retry executor that dispatches retry processing to prevent
+ * slowing the main thread in the retrier logic. If any worker fails
+ * to pass the retry checks, processing for the group is halted.
+ * 
+ *  TODO: Refactor to additional classes: especially one for handling retries
+ *  and another would be useful to wrap a custom exception transmitted to Group's
+ *  main thread from the retrier thread. The exception should contain the
+ *  task and group ids.
+ */
 public class Group<T> {
-	private final int taskRetryLimit = 2;
-	private final Map<Integer, Integer> retries = new HashMap<Integer, Integer>();
+	private final int groupIndex;
 	private final List<Task<T>> tasks = new ArrayList<Task<T>>();
+	private final Retrier retryCheckStrategy = new TimedRetrierDecorator(
+			new ImmediateCounting());
+
+	private final Map<Future<T>, Integer> futureMap = new HashMap<Future<T>, Integer>();
+	private final ExecutorService retryExecutor = Executors
+			.newCachedThreadPool();
+	private final ExecutorService ecsExecutorService;
+	private final ExecutorCompletionService<T> ecs;
+	private IllegalStateException retryException;
+	private static boolean isRetryExceptionSet = false;
 
 	private Group(GroupBuilder<T> builder) {
 		int count = 0;
@@ -46,60 +73,79 @@ public class Group<T> {
 			Task<T> t = new Task<T>(count++, callable);
 			tasks.add(t);
 		}
+		groupIndex = builder.groupIndex;
+
+		ecsExecutorService = Executors
+				.newFixedThreadPool(builder.threadPoolSize);
+		ecs = new ExecutorCompletionService<T>(ecsExecutorService);
 	}
 
 	/*
-	 * WorkGroup Public API
+	 * Group Public API
 	 * 
 	 * Process group set by submitting the group's work to a threadpool and then
 	 * retrying any failed tasks as many times as the retry policy permits.
 	 * 
-	 * @param s the executor service to use to process each task.
-	 * 
-	 * @param groupIndex the ID for the group's execution order, starting with 0
-	 * 
-	 * @throws InterruptedException if the callable is interrupted. This
-	 * exception is not expected.
+	 * @throws IllegalArgumentException if the Callable is interrupted. This
+	 * occurs if retries max out.
 	 * 
 	 * @returns A list of results in the order the group tasks were provided.
 	 */
-	public Result<T> processGroup(ExecutorService s, int groupIndex)
-			throws InterruptedException {
-		CompletionService<T> ecs = new ExecutorCompletionService<T>(s);
-		processAsyncTaskResults(groupIndex, ecs, submitTasksForProcessing(ecs));
-
-		return getResults();
+	public Result<T> processGroup() {
+		try {
+			submitTasksForProcessing(ecs);
+			if (processAsyncTaskResults(ecs)) {
+				return getResults();
+			} else {
+				throw retryException;
+			}
+		} finally {
+			retryExecutor.shutdownNow();
+			ecsExecutorService.shutdownNow();
+		}
 	}
 
-	private Map<Future<T>, Integer> submitTasksForProcessing(
-			CompletionService<T> ecs) {
-		Map<Future<T>, Integer> futureMap = new HashMap<Future<T>, Integer>();
-
+	private void submitTasksForProcessing(CompletionService<T> ecs) {
 		for (Task<T> t : tasks) {
 			Future<T> future = ecs.submit(t.getCallable());
 			futureMap.put(future, t.getTaskId());
 		}
-		return futureMap;
 	}
 
-	private void processAsyncTaskResults(int groupIndex,
-			CompletionService<T> ecs, Map<Future<T>, Integer> futureMap)
-			throws InterruptedException {
+	private boolean processAsyncTaskResults(final CompletionService<T> ecs) {
 		while (getIncompleteTasks().size() > 0) {
-			Future<T> future = ecs.take();
-			Integer taskId = futureMap.get(future);
-
+			Future<T> future;
 			try {
-				T result = future.get();
-				Task<T> task = getTask(taskId);
-				task.setComplete(true);
-				task.setResult(result);
-			} catch (ExecutionException e) {
-				checkRetryPolicy(groupIndex, taskId);
-				futureMap
-						.put(ecs.submit(getTask(taskId).getCallable()), taskId);
+				// blocks if no jobs are present to take
+				future = ecs.take();
+				int taskId = futureMap.get(future);
+
+				try {
+					T result = future.get();
+					Task<T> task = getTask(taskId);
+					task.setComplete(true);
+					task.setResult(result);
+				} catch (ExecutionException e) {
+					handleRetries(groupIndex, ecs, taskId);
+				} finally {
+					futureMap.remove(future);
+				}
+				// Interrupt when retries are maxed out
+			} catch (InterruptedException interrupt) {
+				return false;
 			}
 		}
+
+		return true;
+	}
+
+	// handle retries in separate thread to avoid slowing the main thread
+	private void handleRetries(final int groupIndex,
+			final CompletionService<T> ecs, int taskId)
+			throws InterruptedException {
+		Runnable retryTask = new RetryWorker(taskId, Thread.currentThread());
+
+		retryExecutor.submit(retryTask);
 	}
 
 	private List<Task<T>> getIncompleteTasks() {
@@ -129,33 +175,65 @@ public class Group<T> {
 		return results;
 	}
 
-	private void checkRetryPolicy(int groupIndex, int taskId)
-			throws InterruptedException {
-		Integer taskRetries = 0;
-		if (retries.containsKey(taskId)) {
-			taskRetries = retries.get(taskId);
+	private synchronized void setRetryException(IllegalStateException e) {
+		if (!isRetryExceptionSet) {
+			this.retryException = e;
+			isRetryExceptionSet = true;
 		}
-
-		retries.put(taskId, ++taskRetries);
-
-		if (taskRetries > taskRetryLimit) {
-			throw new IllegalStateException("Group " + groupIndex
-					+ " exceeded retry limit, entire work set cancelled");
-		}
-
 	}
 
+	private class RetryWorker implements Runnable {
+		private final int taskId;
+		private final Task<T> task;
+		private final Thread mainThread;
+
+		public RetryWorker(int taskId, Thread mainThread) {
+			super();
+			this.taskId = taskId;
+			this.mainThread = mainThread;
+			task = getTask(taskId);
+		}
+
+		@Override
+		public void run() {
+			try {
+				retryCheckStrategy.retry(groupIndex, taskId);
+				futureMap.put(ecs.submit(task.getCallable()), taskId);
+			} catch (IllegalStateException e) {
+				setRetryException(e);
+
+				// Tell main ecs taker to exit early - retries maxed out
+				mainThread.interrupt();
+			}
+		}
+	}
+
+	/*
+	 * Builder for Group - this is a basic wrapper that simplifies client
+	 * construction
+	 */
 	public static class GroupBuilder<T> {
+		private static AtomicInteger groupIndexCounter = new AtomicInteger(0);
+		private final int groupIndex;
 		private final List<Callable<T>> callables = new ArrayList<Callable<T>>();
+		private int threadPoolSize = 5;
+
+		public GroupBuilder() {
+			groupIndex = groupIndexCounter.getAndAdd(1);
+		}
 
 		public GroupBuilder<T> addCallable(Callable<T> callable) {
 			callables.add(callable);
 			return this;
 		}
 
+		public GroupBuilder<T> threadPoolSize(int threadPoolSize) {
+			this.threadPoolSize = threadPoolSize;
+			return this;
+		}
+
 		public Group<T> build() {
 			return new Group<T>(this);
 		}
-
 	}
 }

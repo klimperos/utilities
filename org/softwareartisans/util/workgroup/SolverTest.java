@@ -31,30 +31,34 @@ import org.softwareartisans.util.workgroup.Space.SpaceBuilder;
 
 /*
  * Driver to create a set of Workerbee tasks
- * and a couple groups, submit them to the work group distributor
- * and output the result lists.
+ * and a couple groups, submit them to the Space solver
+ * and output the results.
  */
-public class SolverTest {
-
+class SolverTest {
 	public static void main(String[] args) {
 		GroupBuilder<Integer> groupBuilder = new GroupBuilder<Integer>();
 		for (int i = 0; i < 10; i++) {
 			Callable<Integer> workerBee = new WorkerBee(i);
 			groupBuilder.addCallable(workerBee);
 		}
+		groupBuilder.threadPoolSize(10);
 
 		SpaceBuilder<Integer> spaceBuilder = new SpaceBuilder<Integer>();
 		spaceBuilder.addGroup(groupBuilder.build());
 		spaceBuilder.addGroup(groupBuilder.build());
-		spaceBuilder.threadPoolSize(10);
 
 		int count = 0;
-		for (Result<Integer> groupResult : spaceBuilder.build().solve()) {
-			System.out.println("Group " + count++ + ": " + groupResult);
+
+		try {
+			for (Result<Integer> groupResult : spaceBuilder.build().solve()) {
+				System.out.println("Group " + count++ + ": " + groupResult);
+			}
+		} catch (Exception e) {
+			System.out.println(e.getMessage());
 		}
 	}
 
-	static class WorkerBee implements Callable<Integer> {
+	private static class WorkerBee implements Callable<Integer> {
 		private final int number;
 		private int count = 0;
 
@@ -64,7 +68,7 @@ public class SolverTest {
 
 		@Override
 		public Integer call() throws Exception {
-			if ((number == 7 || number == 5) && count++ < 2) {
+			if (number == 5 && count++ < 3) {
 				throw new Exception("Test Exception for thread: " + number);
 			} else {
 				return number * number;

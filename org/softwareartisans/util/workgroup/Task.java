@@ -26,6 +26,11 @@ package org.softwareartisans.util.workgroup;
 
 import java.util.concurrent.Callable;
 
+/*
+ * Wrapper class for Callable<T> makes it possible to properly track callables
+ * using a taskId without forcing any changes on the class(es) implementing Callable<T>.
+ * 
+ */
 public class Task<T> {
 	private final int taskId;
 	private final Callable<T> callable;

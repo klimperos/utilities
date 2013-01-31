@@ -45,5 +45,4 @@ public class Result<T> {
 	public String toString() {
 		return "WorkGroupResult [results=" + results + "]";
 	}
-
 }
